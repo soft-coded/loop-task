@@ -100,7 +100,7 @@ def get_uptime_last_day(store_id: str) -> Tuple[int, int]:
         last_day_ts.weekday(),
     )
 
-    uptime = 0  # in hours
+    uptime = downtime = 0  # in hours
     # get the store's business hours for this weekday
     business_hours = get_store_time(store_id, last_day_ts.weekday())
     print("Store's business hours on this weekday:")
@@ -122,21 +122,25 @@ def get_uptime_last_day(store_id: str) -> Tuple[int, int]:
             status.status,
         )
 
-        if status.status == "inactive":
-            continue
-
         if status_dt.date() != last_day_ts.date():
             print("Passed last day")
             break  # passed the last day if the code reached here
 
         for hours in business_hours:
-            # if the poll was made during the business hours of the store
-            if hours[0].time() <= status_dt.time() <= hours[1].time():
-                print("Adding to uptime")
-                # Assumption: Polls are made every hour, so taking every poll as one whole hour
-                uptime += 1
+            # if the poll was made outside the business hours of the store, ignore it
+            poll_time = status_dt.time()
+            # less than the start_time or greater than the end_time
+            if poll_time < hours[0].time() or poll_time > hours[1].time():
+                continue
 
-    downtime = floor(total_business_hours - uptime)
+            # Assumption: Polls are made every hour, so taking every poll as one whole hour
+            if status.status == "active":
+                print("Adding to uptime")
+                uptime += 1
+            else:
+                print("Adding to downtime")
+                downtime += 1
+
     print(f"Total uptime: {uptime}, total downtime:", downtime)
     # (uptime, downtime)
     return (uptime, downtime)
@@ -190,7 +194,7 @@ def add_data_to_db():
 # test
 @app.route("/test")
 def test_route():
-    store_id = "86895211682051637"
+    store_id = "4020998833599916392"
     print(get_uptime_last_day(store_id))
 
     return "Check console"
