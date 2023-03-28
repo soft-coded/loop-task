@@ -284,8 +284,7 @@ def add_data_to_db():
 @app.route("/test")
 def test_route():
     st = time.time()
-    # all_stores: List[Timezone] = Timezone.query.order_by("store_id").all()
-    all_stores: List[Timezone] = [Timezone.query.order_by("store_id").first()]
+    all_stores: List[Timezone] = Timezone.query.order_by("store_id").all()
 
     stores_data = []
     for store in all_stores:
@@ -301,7 +300,7 @@ def test_route():
         }
         stores_data.append(store_data)
 
-    print("\n\nTime taken:", time.time() - st)
+    print("\n\nTime taken:", (time.time() - st) / 60)
     return jsonify(stores_data)
 
 
