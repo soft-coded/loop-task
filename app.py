@@ -1,10 +1,12 @@
-from flask import Flask
+from flask import Flask, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import desc
 from datetime import datetime
-from typing import List, Literal, Tuple, TypedDict
+from typing import List, Literal, Tuple, TypedDict, Union, Dict
 import csv
 import pytz
+
+import time
 
 ## FLASK APP
 app = Flask(__name__)
@@ -89,7 +91,7 @@ def get_local_tz(store_id: str):
     return local_tz
 
 
-# type class for typing the return value of the following function
+# type class for typing the return type of the following function
 class InitialVars(TypedDict):
     local_tz: pytz.BaseTzInfo
     last_day_ts: datetime
@@ -98,13 +100,17 @@ class InitialVars(TypedDict):
 
 
 # helper function to initialise the getters below
-def get_initial_vars(store_id: str) -> InitialVars:
+def get_initial_vars(store_id: str) -> Union[InitialVars, None]:
     # get timestamps in descending order to get the last day records
     store_status: List[StoreStatus] = (
         StoreStatus.query.filter((StoreStatus.store_id == store_id))
         .order_by(desc("timestamp"))
         .all()
     )
+
+    # if no polls are available for a store, return None
+    if not store_status:
+        return None
 
     # first entry is the last day, last time in UTC
     local_tz = get_local_tz(store_id)
@@ -129,66 +135,43 @@ def get_initial_vars(store_id: str) -> InitialVars:
     }
 
 
-# get up and down times for the last hour
-def get_uptime_last_hour(store_id: str) -> Tuple[int, int]:
-    print(f"Getting uptime (last hour) for store with id {store_id}")
+# type class for the return type of the following function
+class AllTimes(TypedDict):
+    up_weekly: int  # in hours
+    down_weekly: int  # in hours
+    up_daily: int  # in hours
+    down_daily: int  # in hours
+    up_hourly: int  # in minutes
+    down_hourly: int  # in minutes
 
+
+# get up and down times for a store
+def get_uptime(store_id: str) -> AllTimes:
+    print(f"\nCalculating uptime for store with id {store_id}")
+
+    times: AllTimes = {
+        "up_weekly": 0,  # in hours
+        "down_weekly": 0,  # in hours
+        "up_daily": 0,  # in hours
+        "down_daily": 0,  # in hours
+        "up_hourly": 0,  # in minutes
+        "down_hourly": 0,  # in minutes
+    }
     # get initial variables for this store
     initial_vars = get_initial_vars(store_id)
+    # if no polls are available for a store, return uptime=0 and downtime=0
+    if initial_vars is None:
+        return times
+
     store_status = initial_vars["store_status"]
     local_tz = initial_vars["local_tz"]
+    last_day_ts = initial_vars["last_day_ts"]
     business_hours = initial_vars["business_hours"]
 
-    uptime = downtime = 0  # in minutes
-
-    # calculate for the last business hour
+    last_day_date = last_day_ts.date()
     did_hit_last_hour = False
-
-    print("Beginning uptime count")
-    for status in store_status:
-        if did_hit_last_hour:
-            break
-
-        status_dt = status.timestamp.astimezone(local_tz)
-        print(
-            f"Current poll: {status_dt.strftime(timestamp_format)}, status:",
-            status.status,
-        )
-
-        for hours in business_hours:
-            # if the poll was made outside the business hours of the store, ignore it
-            poll_time = status_dt.time()
-            # less than the start_time or greater than the end_time
-            if poll_time < hours[0].time() or poll_time > hours[1].time():
-                continue
-
-            # Assumption: Polls are made every hour, so taking every poll as one whole hour
-            if status.status == "active":
-                print("Adding to uptime")
-                uptime += 60
-            else:
-                print("Adding to downtime")
-                downtime += 60
-
-            # if reached here then the last hour has been hit
-            did_hit_last_hour = True
-
-    print(f"Total uptime: {uptime}, total downtime:", downtime)
-    return (uptime, downtime)
-
-
-# get up and down times for the last day
-def get_uptime_last_day(store_id: str) -> Tuple[int, int]:
-    print(f"Getting uptime (last day) for store with id {store_id}")
-
-    # get initial variables for this store
-    initial_vars = get_initial_vars(store_id)
-    store_status = initial_vars["store_status"]
-    local_tz = initial_vars["local_tz"]
-    last_day_ts = initial_vars["last_day_ts"]
-    business_hours = initial_vars["business_hours"]
-
-    uptime = downtime = 0  # in hours
+    did_hit_last_day = False
+    did_hit_last_week = False
 
     print("Beginning uptime count")
     for status in store_status:
@@ -198,63 +181,27 @@ def get_uptime_last_day(store_id: str) -> Tuple[int, int]:
             status.status,
         )
 
-        if status_dt.date() != last_day_ts.date():
+        if not did_hit_last_day and status_dt.date() != last_day_date:
+            # passed the last day if the code reached here
             print("Passed last day")
-            break  # passed the last day if the code reached here
+            did_hit_last_day = True
 
-        for hours in business_hours:
-            # if the poll was made outside the business hours of the store, ignore it
-            poll_time = status_dt.time()
-            # less than the start_time or greater than the end_time
-            if poll_time < hours[0].time() or poll_time > hours[1].time():
-                continue
-
-            # Assumption: Polls are made every hour, so taking every poll as one whole hour
-            if status.status == "active":
-                print("Adding to uptime")
-                uptime += 1
-            else:
-                print("Adding to downtime")
-                downtime += 1
-
-    print(f"Total uptime: {uptime}, total downtime:", downtime)
-    # (uptime, downtime)
-    return (uptime, downtime)
-
-
-# get up and down times for the last week
-def get_uptime_last_week(store_id: str) -> Tuple[int, int]:
-    print(f"Getting uptime (last week) for store with id {store_id}")
-    # get initial variables for this store
-    initial_vars = get_initial_vars(store_id)
-    store_status = initial_vars["store_status"]
-    local_tz = initial_vars["local_tz"]
-    last_day_ts = initial_vars["last_day_ts"]
-    business_hours = initial_vars["business_hours"]
-
-    uptime = downtime = 0  # in hours
-
-    # calculate for the last week
-    print("Beginning uptime count")
-    for status in store_status:
-        status_dt = status.timestamp.astimezone(local_tz)
-        print(
-            f"Current poll: {status_dt.strftime(timestamp_format)}, status:",
-            status.status,
-        )
-
-        # if completed the count for the whole week, break
-        if (
-            status_dt.date() != last_day_ts.date()
+        if not did_hit_last_week and (
+            status_dt.date() != last_day_date
             and status_dt.weekday() == last_day_ts.weekday()
         ):
             # if reached the same weekday on a different date, then completed calculating for an entire week
             print("Passed last week")
+            did_hit_last_week = True
+
+        # if hit all three time intervals, done for this store
+        if did_hit_last_week and did_hit_last_day and did_hit_last_hour:
+            print(f"Done calculating for store with id {store_id}")
             break
 
         for hours in business_hours:
-            # if the poll was made outside the business hours of the store, ignore it
             poll_time = status_dt.time()
+            # if the poll was made outside the business hours of the store, ignore it
             # less than the start_time or greater than the end_time
             if poll_time < hours[0].time() or poll_time > hours[1].time():
                 continue
@@ -262,13 +209,30 @@ def get_uptime_last_week(store_id: str) -> Tuple[int, int]:
             # Assumption: Polls are made every hour, so taking every poll as one whole hour
             if status.status == "active":
                 print("Adding to uptime")
-                uptime += 1
+
+                if not did_hit_last_hour:
+                    times["up_hourly"] += 60  # in minutes
+                if not did_hit_last_day:
+                    times["up_daily"] += 1
+                if not did_hit_last_week:
+                    times["up_weekly"] += 1
             else:
                 print("Adding to downtime")
-                downtime += 1
 
-    print(f"Total uptime: {uptime}, total downtime:", downtime)
-    return (uptime, downtime)
+                if not did_hit_last_hour:
+                    times["down_hourly"] += 60  # in minutes
+                if not did_hit_last_day:
+                    times["down_daily"] += 1
+                if not did_hit_last_week:
+                    times["down_weekly"] += 1
+
+            # if reached here then the last hour has been hit
+            if not did_hit_last_hour:
+                print("Passed last hour")
+                did_hit_last_hour = True
+
+    print("Final values:", times, "\n")
+    return times
 
 
 ## ROUTES
@@ -319,7 +283,26 @@ def add_data_to_db():
 # test
 @app.route("/test")
 def test_route():
-    return ""
+    st = time.time()
+    # all_stores: List[Timezone] = Timezone.query.order_by("store_id").all()
+    all_stores: List[Timezone] = [Timezone.query.order_by("store_id").first()]
+
+    stores_data = []
+    for store in all_stores:
+        times = get_uptime(store.store_id)
+        store_data = {
+            "store_id": store.store_id,
+            "uptime_last_hour": times["up_hourly"],
+            "downtime_last_hour": times["down_hourly"],
+            "uptime_last_day": times["up_daily"],
+            "downtime_last_day": times["down_daily"],
+            "uptime_last_week": times["up_weekly"],
+            "downtime_last_week": times["down_weekly"],
+        }
+        stores_data.append(store_data)
+
+    print("\n\nTime taken:", time.time() - st)
+    return jsonify(stores_data)
 
 
 ## RUN
