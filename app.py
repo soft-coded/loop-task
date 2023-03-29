@@ -8,7 +8,6 @@ import random
 import string
 import csv
 import pytz
-
 import time
 
 ## FLASK APP
