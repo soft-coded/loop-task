@@ -249,45 +249,48 @@ def get_times(store_id: str) -> AllTimes:
 
 # generate the csv file
 def generate_report(report_id: str):
-    st = time.time()
-    all_stores: List[Timezone] = Timezone.query.order_by("store_id").limit(25).all()
+    with app.app_context():
+        st = time.time()
+        all_stores: List[Timezone] = []
 
-    with open(f"./reports/{report_id}.csv", "w") as file:
-        writer = csv.writer(file)
-        writer.writerow(
-            [
-                "store_id",
-                "uptime_last_hour(in minutes)",
-                "uptime_last_day(in hours)",
-                "uptime_last_week(in hours)",
-                "downtime_last_hour(in minutes)",
-                "downtime_last_day(in hours)",
-                "downtime_last_week(in hours)",
-            ]
-        )
+        all_stores = Timezone.query.order_by("store_id").limit(100).all()
 
-        for store in all_stores:
-            times = get_times(store.store_id)
+        with open(f"./reports/{report_id}.csv", "w", newline="") as file:
+            writer = csv.writer(file)
             writer.writerow(
                 [
-                    store.store_id,
-                    times["up_hourly"],
-                    times["up_daily"],
-                    times["up_weekly"],
-                    times["down_hourly"],
-                    times["down_daily"],
-                    times["down_weekly"],
+                    "store_id",
+                    "uptime_last_hour(in minutes)",
+                    "uptime_last_day(in hours)",
+                    "uptime_last_week(in hours)",
+                    "downtime_last_hour(in minutes)",
+                    "downtime_last_day(in hours)",
+                    "downtime_last_week(in hours)",
                 ]
             )
 
-    time_taken = (time.time() - st) / 60  # in minutes
+            for store in all_stores:
+                times = get_times(store.store_id)
+                writer.writerow(
+                    [
+                        store.store_id,
+                        times["up_hourly"],
+                        times["up_daily"],
+                        times["up_weekly"],
+                        times["down_hourly"],
+                        times["down_daily"],
+                        times["down_weekly"],
+                    ]
+                )
 
-    report: Report = Report.query.filter(report_id=report_id).first()
-    report.status = "Completed"
-    report.time_taken = time_taken
-    db.session.commit()
+        time_taken = (time.time() - st) / 60  # in minutes
 
-    print("\n\nTime taken:", time_taken)
+        report: Report = Report.query.filter(Report.report_id == report_id).first()
+        report.status = "Completed"
+        report.time_taken = time_taken
+        db.session.commit()
+
+        print("\nTime taken:", time_taken)
 
 
 ## ROUTES
@@ -353,12 +356,12 @@ def trigger_report():
 
 @app.route("/get_report/<report_id>")
 def get_report(report_id: str):
-    report: Report = Report.query.filter(report_id=report_id).first()
+    report: Report = Report.query.filter(Report.report_id == report_id).first()
 
     if report.status == "Running":
         return jsonify({"status": "Running"})
 
-    return send_file("./reports/{report_id}.csv")
+    return send_file(f"./reports/{report_id}.csv")
 
 
 ## RUN
