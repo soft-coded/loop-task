@@ -209,6 +209,7 @@ def get_times(store_id: str) -> AllTimes:
             print(f"Done calculating for store with id {store_id}")
             break
 
+        business_hours = get_store_time(store_id, status_dt.weekday())
         for hours in business_hours:
             poll_time = status_dt.time()
             # if the poll was made outside the business hours of the store, ignore it
