@@ -179,6 +179,7 @@ def get_times(store_id: str) -> AllTimes:
     business_hours = initial_vars["business_hours"]
 
     last_day_date = last_day_ts.date()
+    prev_day = last_day_date.day
     did_hit_last_hour = False
     did_hit_last_day = False
     did_hit_last_week = False
@@ -209,7 +210,11 @@ def get_times(store_id: str) -> AllTimes:
             print(f"Done calculating for store with id {store_id}")
             break
 
-        business_hours = get_store_time(store_id, status_dt.weekday())
+        # if the day has changed, fetch the business hours for the new day
+        if prev_day != status_dt.day:
+            prev_day = status_dt.day
+            business_hours = get_store_time(store_id, status_dt.weekday())
+
         for hours in business_hours:
             poll_time = status_dt.time()
             # if the poll was made outside the business hours of the store, ignore it
@@ -250,9 +255,9 @@ def get_times(store_id: str) -> AllTimes:
 def generate_report(report_id: str):
     with app.app_context():
         st = time.time()
-        all_stores: List[Timezone] = []
-
-        all_stores = Timezone.query.order_by("store_id").limit(100).all()
+        all_stores: List[Timezone] = (
+            Timezone.query.order_by("store_id").limit(100).all()
+        )
 
         with open(f"./reports/{report_id}.csv", "w", newline="") as file:
             writer = csv.writer(file)
