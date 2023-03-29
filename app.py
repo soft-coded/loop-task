@@ -4,7 +4,6 @@ from sqlalchemy import desc
 from datetime import datetime
 from typing import List, Literal, Tuple, TypedDict, Union
 from threading import Thread
-from pathlib import Path
 import random
 import string
 import csv
