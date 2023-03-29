@@ -1,8 +1,12 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, send_file
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import desc
 from datetime import datetime
-from typing import List, Literal, Tuple, TypedDict, Union, Dict
+from typing import List, Literal, Tuple, TypedDict, Union
+from threading import Thread
+from pathlib import Path
+import random
+import string
 import csv
 import pytz
 
@@ -46,6 +50,14 @@ class Timezone(db.Model):
     id: int = db.Column(db.Integer, primary_key=True)
     store_id: str = db.Column(db.String)
     timezone: str = db.Column(db.String)
+
+
+# reports model for keeping track of reports
+class Report(db.Model):
+    report_id: str = db.Column(db.String, primary_key=True)
+    status: Literal["Running", "Completed"] = db.Column(db.String, default="Running")
+    # time taken to generate the report (in minutes)
+    time_taken: float = db.Column(db.Float)
 
 
 ## HELPERS
@@ -146,7 +158,7 @@ class AllTimes(TypedDict):
 
 
 # get up and down times for a store
-def get_uptime(store_id: str) -> AllTimes:
+def get_times(store_id: str) -> AllTimes:
     print(f"\nCalculating uptime for store with id {store_id}")
 
     times: AllTimes = {
@@ -159,7 +171,7 @@ def get_uptime(store_id: str) -> AllTimes:
     }
     # get initial variables for this store
     initial_vars = get_initial_vars(store_id)
-    # if no polls are available for a store, return uptime=0 and downtime=0
+    # if no polls are available for a store, return
     if initial_vars is None:
         return times
 
@@ -235,6 +247,49 @@ def get_uptime(store_id: str) -> AllTimes:
     return times
 
 
+# generate the csv file
+def generate_report(report_id: str):
+    st = time.time()
+    all_stores: List[Timezone] = Timezone.query.order_by("store_id").limit(25).all()
+
+    with open(f"./reports/{report_id}.csv", "w") as file:
+        writer = csv.writer(file)
+        writer.writerow(
+            [
+                "store_id",
+                "uptime_last_hour(in minutes)",
+                "uptime_last_day(in hours)",
+                "uptime_last_week(in hours)",
+                "downtime_last_hour(in minutes)",
+                "downtime_last_day(in hours)",
+                "downtime_last_week(in hours)",
+            ]
+        )
+
+        for store in all_stores:
+            times = get_times(store.store_id)
+            writer.writerow(
+                [
+                    store.store_id,
+                    times["up_hourly"],
+                    times["up_daily"],
+                    times["up_weekly"],
+                    times["down_hourly"],
+                    times["down_daily"],
+                    times["down_weekly"],
+                ]
+            )
+
+    time_taken = (time.time() - st) / 60  # in minutes
+
+    report: Report = Report.query.filter(report_id=report_id).first()
+    report.status = "Completed"
+    report.time_taken = time_taken
+    db.session.commit()
+
+    print("\n\nTime taken:", time_taken)
+
+
 ## ROUTES
 # index route, to check whether the server is running or not
 @app.route("/")
@@ -280,28 +335,30 @@ def add_data_to_db():
     return "Done"
 
 
-# test
-@app.route("/test")
-def test_route():
-    st = time.time()
-    all_stores: List[Timezone] = Timezone.query.order_by("store_id").all()
+@app.route("/trigger_report")
+def trigger_report():
+    # random string of 10 characters, to be used as an id and filename
+    report_id = "".join(random.choices(string.ascii_letters + string.digits, k=10))
 
-    stores_data = []
-    for store in all_stores:
-        times = get_uptime(store.store_id)
-        store_data = {
-            "store_id": store.store_id,
-            "uptime_last_hour": times["up_hourly"],
-            "downtime_last_hour": times["down_hourly"],
-            "uptime_last_day": times["up_daily"],
-            "downtime_last_day": times["down_daily"],
-            "uptime_last_week": times["up_weekly"],
-            "downtime_last_week": times["down_weekly"],
-        }
-        stores_data.append(store_data)
+    # add report_id to database
+    report = Report(report_id=report_id)
+    db.session.add(report)
+    db.session.commit()
 
-    print("\n\nTime taken:", (time.time() - st) / 60)
-    return jsonify(stores_data)
+    # generate the report on a separate thread
+    Thread(target=generate_report, kwargs={"report_id": report_id}).start()
+
+    return jsonify({"report_id": report_id})
+
+
+@app.route("/get_report/<report_id>")
+def get_report(report_id: str):
+    report: Report = Report.query.filter(report_id=report_id).first()
+
+    if report.status == "Running":
+        return jsonify({"status": "Running"})
+
+    return send_file("./reports/{report_id}.csv")
 
 
 ## RUN
